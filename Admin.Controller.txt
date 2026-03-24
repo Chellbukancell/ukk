@@ -1,0 +1,884 @@
+File Admin Controller
+
+<?php
+
+namespace App\Http\Controllers;
+use App\Https\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
+use App\Models\Product;
+use Illuminate\Support\Facades\DB;
+
+class AdminController
+{
+    public function store(Request $request) {
+        try {
+                    // melakukan validasi request inputan
+            $validator = Validator::make($request->all(), [
+                    'name' => 'required|unique:products|max:225',
+                    'size' => 'required',
+                    'price' => 'required',
+                    'quantity' => 'required',
+                    'description' => 'required'
+                ],[
+                    'name.required'=> 'nama wajib disi..',
+                    'size.required'=> 'ukuran wajib dipilih..',
+                    'price.required'=> 'harga wajib disi..',
+                    'quantity.required'=> 'jumlah wajib dipilih..',
+                    'description.required'=> 'keterangan wajib disi..'
+            ]);
+
+
+
+        // mengecek jika ada validasi gagal/fail
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => $validator->errors()
+            ],422);
+        }
+
+        // mengumpulkan seluruh data yang berhasil divalidasi kedalam array
+        $validated = $validator->validated();
+
+        // menyimpann data product baru
+        DB::table('products')->insert([
+        'name'=> $validated['name'],
+            'size'=> $validated['size'],
+            'price'=>$validated['price'],
+            'description'=>$validated['description']
+        ]);
+
+
+        $productId = DB::getPdo()->lastInsertId();
+
+
+        DB::insert('INSERT INTO stocks (product_id, quantity, created_at, updated_at) VALUES (?, ?, ?, ?)',
+        [$productId, $validated['quantity'], now(), now()]);
+
+
+          return response()->json([
+            'message'   => 'Data Berhasil Ditambahkan'
+        ],201);
+
+       $productId = DB::getLastCreateId();
+        dd($productId);
+        } catch (\Exception $error) {
+
+            return response()->json([
+            'message'    =>$error->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getListProduct() {
+        try {
+
+            $listProduct = Product::with('stock') ->get();
+
+            return response()->json([
+            'message'    =>'get list product seccessfully',
+            'response'   => $listProduct
+            ], 200);
+
+        } catch (\Exception $error) {
+
+        return response()->json([
+            'message'    => $error->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteProduct($productId) {
+        try {
+            // mengambil data product by id
+            $product = Product::FindOrFail($productId);
+
+            // mengecek jika da product dengan stocknya
+            if($product->stock) {
+                $product->stock->delete();
+            }
+
+            // jika data stock tidak ada, product hapus
+            $product->delete();
+
+            return response()->json(['message' => 'produk berhasil dihapus..'], 200);
+        } catch (\Throwable $th) {
+           return response()->json(['error' => $th ->getMessage()], 200);
+        }
+    }
+
+    public function getProductBy($productId) {
+        try {
+            $product = Product::with('stock')->findOrFail($productId);
+            return response()->json([
+                'message' => 'get product successfully',
+                'response' => $product
+            ], 200);
+        } catch (\Throwable $th) {
+           return response()->json(['error' => $th ->getMessage()], 500);
+        }
+    }
+
+    public function updateStock(Request $request) {
+        try {
+        // mengambil semua request dari FE
+        $dataRequest = $request->only(['productId', 'quantity']);
+
+        DB::table('stocks')->where('product_id', $dataRequest['productId'])->update(['quantity' => $dataRequest['quantity']]);
+
+        // mengembalikan response berbentuk json
+        return response()->json([
+            'message'   => 'restock produk berhasil.',
+        ], 200);
+
+        } catch (\Exception $error) {
+            return response()->json([
+                'message'   => $error->getMessage()
+            ], 500);
+        }
+
+    }
+}
+
+
+File Models product
+
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class Product extends Model
+{
+    use HasFactory;
+    // registrasi nama table
+    protected $table ='products';
+
+    // registrasi nama kolom
+    protected $fillable = ['name', 'size', 'price ', 'description'];
+
+    // registrasi nama fungsi relasi table products ke table stocks
+    public function stock() {
+        return $this->hasOne(Stock::class);
+    }
+}
+
+File Models stock
+
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class Stock extends Model
+{
+    use HasFactory;
+      // registrasi nama table
+      protected $table = 'stocks';
+
+       // registrasi nama kolom
+    protected $fillable = ['product_id','quantity', 'status'];
+}
+
+File Database product
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+use App\models\Product;
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('products', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('size');
+            $table->integer('price');
+            $table->string('description');
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        //
+    }
+};
+
+File Database stocks
+
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+// registrasi alamat file Model Product untuk digunakan
+use App\models\Product;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('stocks', function (Blueprint $table) {
+            $table->id();
+            $table->foreignIdFor(Product::class);
+            $table->integer('quantity');
+            $table->string('status');
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('stocks');
+    }
+};
+
+File Database Seeder
+
+<?php
+
+namespace Database\Seeders;
+
+// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use Illuminate\Database\Seeder;
+
+class DatabaseSeeder extends Seeder
+{
+    /**
+     * Seed the application's database.
+     */
+    public function run(): void
+    {
+        // \App\Models\User::factory(10)->create();
+
+        \App\Models\User::factory()->create([
+            'name' => 'Test User',
+            'email' => 'test@example.com',
+            'password' => bcrypt('password'),
+            'role' => 'admin'
+        ]);
+    }
+}
+
+File dashboard admin 
+
+<x-app-layout>
+    <!-- {{-- <x-slot name="header">
+        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+            {{ __('Dashboard') }}
+        </h2>
+    </x-slot> --}} -->
+
+    <div class="py-12" x-data="stateProduct">
+        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
+                <div class="p-6 text-gray-900">
+                    <!-- start alert message -->
+                     <template x-if="listProduct.length === 0 && showCard =='table' ">
+                        <div class="p-4 mb-2 text-sm text-white rounded-lg bg-blue-400" role="alert">
+                            <!-- menggunakan operator tenari -->
+                            <span class="font-medium" x-text="listProduct.length === 0 ? 'Data belum tersedia': '' "></span>
+                        </div>
+                     </template>
+                     <!-- end alert message -->
+                      <template x-if="messages.success != ''">
+                        <div class="p-4 mb-4 text-sm text-white rounded-lg bg-green-400" role="alert">
+                            {{-- menggunakan operator tenari --}}
+                            <span class="font-medium" x-text="messages.success"></span>
+                        </div>
+                    </template>
+
+                    {{-- Start Button --}}
+                    <button x-show="showCard == 'table'" x-on:click="btnCreateProduct" type="button" class="inline-flex items-center  text-white bg-blue-400 hover:bg-blue-500 mb-2 rounded-lg box-border border border-transparent focus:ring-4 focus:ring-brand-medium shadow-xs font-medium leading-5 rounded-base text-sm px-4 py-2.5 focus:outline-none">
+                        <svg class="w-4 h-4 me-1.5 -ms-0.5" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7 7V5"/></svg>
+                        Product
+                    </button>
+                    {{-- End Button --}}
+
+                    {{-- Start create component --}}
+                    <div x-show="showCard =='create'">
+                        @include('admin._card_create_product')
+                    </div>
+                    {{-- end create component --}}
+
+                    {{-- Start restock component --}}
+                    <div x-show="showCard =='restock'">
+                        @include('admin._card_restock_product')
+                    </div>
+                    {{-- end restock component --}}
+
+                    {{-- start table --}}
+                    <div x-show="showCard == 'table'" class="relative overflow-x-auto bg-neutral-primary-soft shadow-xs rounded-lg border border-default">
+                            @include('admin._card_table_product')
+                    </div>
+
+                    {{-- end table --}}
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('alpine:init', () => {
+            Alpine.data('stateProduct', () => ({
+                showCard: 'table',
+
+                // membuat array kosong untuk tempat list product
+                listProduct: [],
+
+                // membuat objek product
+                product: { name:'', price: '', size: '', quantity: '', description: '' },
+
+                // menampung data original dari BE
+                originalproduct: { name:'', price: '', size: '', stock:{} , description: '' },
+
+                // menampung edit original dri be
+                editProduct: { name:'', price: '', size: '', stock:{} , description: '' },
+
+                // membuat objek error
+                error: { name:'', price: '', size: '', quantity: '', description: '' },
+                errors: { name:'', price: '', size: '', quantity: '', description: '' },
+
+                listSize: {kecil:'kecil', sedang:'sedang', besar:'sedang'},
+
+                // membuat object messages untuk menampung pesan
+                messages:{ info:'', success:''},
+
+
+                // menggunakan fungsi bawaan alpine untuk inisasi komponen
+                init() {
+                    this.getlistProduct()
+                },
+
+                btnCreateProduct() {
+                    this.messages.info = ''
+                    this.showCard = 'create'
+                },
+                // tombol cancel
+                btnCancel() {
+                    // mengambil seluruh data field product kedalam objek
+                    let someData = Object.values(this.product).some(value=> value !== '')
+
+                    if(someData){
+                        let confirmation = confirm('yakin batal?')
+                        if(confirmation) {
+                            this.resetField()
+                            this.resetErrors()
+                            this.showCard = 'table'
+                        }
+                    }
+
+                    // jika tidak ada sama sekali data akan tutup form create
+                    if(!someData){
+                        this.resetErrors()
+                        this.showCard = 'table'
+
+                    }
+
+                },
+                // fungsi reset seluruh field
+                resetField(){
+                    Object.assign(this.product, {
+                        name:'',
+                        price: '',
+                        size: '',
+                        quantity: '',
+                        description: ''})
+                },
+                // fungsi reset seluruh error
+                resetErrors(){
+                    Object.assign(this.error, {
+                        name:'',
+                        price: '',
+                        size: '',
+                        quantity: '',
+                        description: ''})
+                },
+
+                // tombol kirim data ke BE
+                async btnSubmit() {
+                    try {
+                        this.resetErrors()
+                    //    mengumpulkan seluruh data objek product
+                        let newDataProduct = {
+                            name: this.product.name,
+                            price: this.product.price,
+                            size: this.product.size,
+                            quantity: this.product.quantity,
+                            description: this.product.description,
+                        }
+
+                        // mengirim data product baru ke BE dengan jalur store-product
+                       let result = await axios.post('store-product', newDataProduct)
+
+                    // panggil kembali fungsi resetfield untuk resetfield
+                        this.resetField()
+
+                    // panggil kembali fungsi getListProduct untuk relasi data
+                        this.getlistProduct()
+
+                    // kembalikan ixShowCard menjadi table
+                        this.showCard = 'table'
+
+                    // memasukkan isi message dari Back End
+                        this.messages.success = result.data.message
+
+                        // melakukan reset message success menggunakan setTimeout
+                        setTimeout(() => { this.messages.success = ''}, 5000);
+
+                    } catch (error) {
+                        console.log(error)
+                        if (error.response && error.response.status == 422) {
+                            // mengambil response data message
+                            let responseBE = error.response.data.message
+
+                            // menghapus error sebelumnya
+                            for(let field in this.error) {
+                                this.error[field] = ''
+                            }
+                            // this.resetErrors()
+
+                            // melakukan pembongkaran array errors
+                            for(let field in responseBE) {
+                                this.error[field] = responseBE[field][0]
+                                console.log('error 422', this.error[field])
+                            }
+
+                            // console.log ('error 422', error.response.data.message)
+                        } else {
+                            console.log ('error selain 422', error.response)
+                        }
+                        // console.log(error.response.status)
+                    }
+                },
+
+                // fungsi untuk memanggil listproduct
+                async getlistProduct(){
+                    try {
+                        let result = await axios.get('list-product')
+                        this.listProduct = result.data.response
+
+                        // mengecek kondisi data array listProduct
+
+                    } catch (error) {
+                        console.log(error)
+                    }
+                 },
+
+                 async btnDelete(productId) {
+                    try {
+                        let confirmation = confirm('yakin dihapus?')
+                        if(!confirmation) return
+
+                        // mengirimkan data product id ke url product/productId
+                        console.log('anda pilih oke, berarti mau dihapus')
+                    } catch (error) {
+                        console.log('error', error)
+                    }
+                },
+
+                async btnUpdateStock(stockId) {
+                    try {
+
+
+                        // mengumpul data product stock yang akan dikirim BE
+                        let sendDataUpdate = {
+                            productId : this.editProductStock.productId,
+                            quantity : this.editProductStock.quantity
+                        }
+
+
+
+                        // mengirim data product stock melalui url product/12/update
+                        let result = await axios.patch(`product/$(stockId)/update`)
+                        console.log(productId)
+                    } catch (error) {
+                        console.log(error)
+                    }
+                },
+
+                handleCancelEdit() {
+
+                    let changed = JSON.stringify(this.originalProductStock) !== JSON.stringify(this.editProductStock)
+                        console.log(changed);
+                    if(changed) {
+                    let confirmation = confirm('yakin batal?')
+                            if(!confirmation)
+                                return
+                        }
+
+                        // jika tidak ada sama sekali data akan tutup form create
+                        this.showCard = 'table'
+
+                    },
+
+
+                async btnDelete(productId){
+                    try {
+                        let confirmation = confirm ('yakin menghapus?')
+                        if(!confirmation) return
+                        // mengirimkan productid melalui url
+                        let result = await axios.delete('product-by/' +productId)
+
+                        console.log(result)
+                        // mengambil pesan dari BE dan memasukan ke this.messages
+                        this.messages.success = result.data.message
+                        // setting waktu mereset message
+                        setTimeout(() => {this.messages.success = ''}, 3000)
+                        // reload data table
+                        this.getlistProduct()
+                    } catch (error) {
+                        console.log(error)
+                    }
+                },
+
+                async updateStock() {
+                    try {
+                        // memberi nilai untuk kondisi proses ke BE
+                        this.isProcess = true
+                        // mengumpulkan seluruh data perubahan kedalam objek
+                        let sendUpdateProductStock = {
+                            productId: this.editProduct.id,
+                            quantity: this.editProduct.stock.quantity,
+                        }
+
+                        // mengirim data ke BE melalui uri
+                        let result = await axios.patch(`product/${this.editProduct.id}/restock`, sendUpdateProductStock);
+
+                        // mengembalikan nilai awal is proses
+                        this.isProcess = false
+
+                        // mengambil nilai data message yang dikiirm dari BE
+                        this.messages.success = result.data.message
+
+                        // setting waktu untuk menghapus data message
+                        setTimeout(()=> {this.messages.success = ''}, 5000)
+
+                        // reload data product
+                        this.getListProduct()
+
+                        // mengembalikan ke komponent table
+                        this.showCard = 'table'
+                    } catch (error) {
+                        console.log('error', error)
+                    }
+                },
+
+                async btnEdit(productId){
+                    try {
+
+                        // mengirimkan productid melalui url
+                        let result = await axios.get('product-by/' +productId+'/edit')
+
+                        // masukan data response kedalam variable baru
+                        let dataProduct = result.data.response
+
+                        let clone = structuredClone(dataProduct)
+
+                        // casting tipe data stock
+                        clone.stock.quantity = Number(clone.stock.quantity)
+
+                        // casting data ke editProduct
+                        this.editProduct = clone
+
+
+                        // cloning data ke originalProduct
+                        this.originalproduct = JSON.parse(JSON.stringify(clone))
+                        console.log('data', this.originalproduct)
+
+                        // menampilkan ke card_edit
+                        this.showCard = 'restock'
+
+                        // // mengambil pesan dari BE dan memasukan ke this.messages
+                        // this.messages.success = result.data.message
+                        // // setting waktu mereset message
+                        // setTimeout(() => {this.messages.success = ''}, 3000)
+                        // // reload data table
+                        // this.getlistProduct()
+                    } catch (error) {
+                        console.log(error)
+                    }
+                },
+            }))
+
+        })
+    </script>
+</x-app-layout>
+
+File _card_create_product
+
+<!-- Modal body -->
+<form x-on:submit.prevent="">
+    <div class="grid gap-4 grid-cols-2 py-4 md:py-6">
+        <div class="col-span-2 sm:col-span-1">
+            <label for="name" class="block mb-2.5 text-sm font-medium text-heading">Nama</label>
+            <input type="text" x-model="product.name" name="name" id="name" class="bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full px-3 py-2.5 shadow-xs placeholder:text-body" placeholder="Tulis Nama Barang" >
+            <template x-if="error.name">
+                <p class="mt-2.5 text-sm text-red-400 text-bold"><span class="font-medium" x-text="error.name">r</span></p>
+            </template>
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+            <label for="quantity" class="block mb-2.5 text-sm font-medium text-heading">Jumlah</label>
+            <select id="quantity" x-model="product.quantity"class="block w-full px-3 py-2.5 bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand px-3 py-2.5 shadow-xs placeholder:text-body" >
+                <option value="">Pilih Jumlah</option>
+                @for ($index = 1; $index < 11   ; $index++)
+                <option value="{{ $index }}">{{ $index }}</option>
+                @endfor
+
+            </select>
+            <template x-if="error.quantity">
+                <p class="mt-2.5 text-sm text-red-400 text-bold"><span class="font-medium" x-text="error.quantity">r</span></p>
+            </template>
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+            <label for="size" class="block mb-2.5 text-sm font-medium text-heading">Ukuran</label>
+            <select id="size" x-model="product.size" class="block w-full px-3 py-2.5 bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand px-3 py-2.5 shadow-xs placeholder:text-body" >
+                <option value="">Pilih Ukuran</option>
+                <option value="sm">Kecil</option>
+                <option value="md">Sedang</option>
+                <option value="xl">Besar</option>
+
+            </select>
+            <template x-if="error.size">
+                <p class="mt-2.5 text-sm text-red-400 text-bold"><span class="font-medium" x-text="error.size">r</span></p>
+            </template>
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+            <label for="price" class="block mb-2.5 text-sm font-medium text-heading">Harga</label>
+            <input type="number" x-model="product.price" name="price" id="price" class="bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full px-3 py-2.5 shadow-xs placeholder:text-body" placeholder="Isi Harga Barang" >
+            <template x-if="error.price">
+                <p class="mt-2.5 text-sm text-red-400 text-bold"><span class="font-medium" x-text="error.price">r</span></p>
+            </template>
+        </div>
+        <div class="col-span-2">
+            <label for="description" class="block mb-2.5 text-sm font-medium text-heading">Keterangan</label>
+            <textarea id="description" x-model="product.description" rows="4" class="block bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full p-3.5 shadow-xs placeholder:text-body" placeholder="Tulis Deskripsi Barang"></textarea>
+            <template x-if="error.description">
+                <p class="mt-2.5 text-sm text-red-400 text-bold"><span class="font-medium" x-text="error.description">r</span></p>
+            </template>
+        </div>
+    </div>
+    <div class="flex items-center space-x-4 pt-2 md:pt-4">
+        <button x-on:click="btnSubmit" type="submit" class="inline-flex items-center  text-blue bg-blue-400 hover:bg-blue-500 rounded-lg box-border border border-transparent focus:ring-4 focus:ring-brand-medium shadow-xs font-medium leading-5 rounded-base text-sm px-4 py-2.5 focus:outline-none">
+            Kirim
+        </button>
+        <button x-on:click="btnCancel" type="button" class="text-body bg-grey-400 box-border rounded-lg border border-default-medium hover:bg-neutral-tertiary-medium hover:text-heading focus:ring-4 focus:ring-neutral-tertiary shadow-xs font-medium leading-5 rounded-base text-sm px-4 py-2.5 focus:outline-none">Batal</button>
+    </div>
+</form>
+
+File _card_restock_product
+<form x-on:submit.prevent="">
+    <div class="grid gap-4 grid-cols-2 py-4 md:py-6">
+        <div class="col-span-2 sm:col-span-1">
+            <label for="name" class="block mb-2.5 text-sm font-medium text-heading">Nama</label>
+            <input type="text" x-model="editProduct.name" readonly name="name" id="name" class="cursor-not-allowed bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full px-3 py-2.5 shadow-xs placeholder:text-body" placeholder="Tulis Nama Barang" >
+            <template x-if="errors.name">
+                <p class="mt-2.5 text-sm text-red-400 font-semibold"><span class="font-medium" x-text = "errors.name"></span></p>
+            </template>
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+            <label for="quantity" class="block mb-2.5 text-sm font-medium text-heading">Jumlah</label>
+            <template x-if="editProduct.stock">
+                <select id="quantity" x-model="editProduct.stock.quantity"class="block w-full px-3 py-2.5 bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand px-3 py-2.5 shadow-xs placeholder:text-body" >
+                <option value="editProduct.quantity" x-text="editProduct.quantity"></option>
+                @for ($index = 1; $index < 11   ; $index++)
+                <option value="{{ $index }}">{{ $index }}</option>
+                @endfor
+            </select>
+            </template>
+
+            <template x-if="errors.quantity">
+                <p class="mt-2.5 text-sm text-red-400 font-semibold"><span class="font-medium" x-text = "errors.quantity"></span></p>
+            </template>
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+            <label for="size" class="block mb-2.5 text-sm font-medium text-heading">Ukuran</label>
+            <select id="size" readonly x-model="editProduct.size"  class="cursor-not-allowed block w-full px-3 py-2.5 bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand px-3 py-2.5 shadow-xs placeholder:text-body" >
+                    <option value="editProduct.size" x-text="editProduct.size"></option>
+            </select>
+            <template x-if="errors.size">
+                <p class="mt-2.5 text-sm text-red-400 font-semibold"><span class="font-medium" x-text = "errors.size"></span></p>
+            </template>
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+            <label for="price" class="block mb-2.5 text-sm font-medium text-heading">Harga</label>
+            <input type="number" x-model="editProduct.price" readonly name="price" id="price" class="cursor-not-allowed bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full px-3 py-2.5 shadow-xs placeholder:text-body" placeholder="Isi Harga Barang" >
+            <template x-if="errors.price">
+                <p class="mt-2.5 text-sm text-red-400 font-semibold"><span class="font-medium" x-text = "errors.price"></span></p>
+            </template>
+        </div>
+        <div class="col-span-2">
+            <label for="description" class="block mb-2.5 text-sm font-medium text-heading">Keterangan</label>
+            <textarea id="description" x-model="editProduct.description" readonly rows="4" class="cursor-not-allowed block bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand block w-full p-3.5 shadow-xs placeholder:text-body" placeholder="Tulis Deskripsi Barang"></textarea>
+            <template x-if="errors.description">
+                <p class="mt-2.5 text-sm text-red-400 font-semibold"><span class="font-medium" x-text = "errors.description"></span></p>
+            </template>
+        </div>
+    </div>
+    <div class="flex items-center space-x-4 pt-2 md:pt-4">
+        <button x-on:click="updateStock" type="submit" class="inline-flex items-center  text-blue bg-blue-400 hover:bg-blue-500 rounded-lg box-border border border-transparent focus:ring-4 focus:ring-brand-medium shadow-xs font-medium leading-5 rounded-base text-sm px-4 py-2.5 focus:outline-none">
+            Edit
+        </button>
+        <button x-on:click="handleCancelEdit" type="button" class="text-body bg-grey-400 box-border rounded-lg border border-default-medium hover:bg-neutral-tertiary-medium hover:text-heading focus:ring-4 focus:ring-neutral-tertiary shadow-xs font-medium leading-5 rounded-base text-sm px-4 py-2.5 focus:outline-none">
+            Batal
+        </button>
+    </div>
+</form>
+
+File _card_table_product
+<table class="w-full text-sm text-left rtl:text-right text-body">
+    <thead class="text-sm text-body bg-neutral-secondary-medium border-b border-default-medium">
+        <tr>
+                <th scope="col" class="px-6 py-3 font-medium">
+                #
+            </th>
+            <th scope="col" class="px-6 py-3 font-medium">
+                Nama
+            </th>
+            <th scope="col" class="px-6 py-3 font-medium">
+                Ukuran
+            </th>
+                <th scope="col" class="px-6 py-3 font-medium">
+                Harga
+            </th>
+            <th scope="col" class="px-6 py-3 font-medium">
+                Jumlah
+            </th>
+            <th scope="col" class="px-6 py-3 font-medium">
+                <span class="sr-only">Edit</span>
+            </th>
+        </tr>
+    </thead>
+    <tbody>
+        <template x-if="listProduct.length > 0">
+            <template x-for="(product, index) in listProduct" :key="product.id">
+                <tr class="bg-neutral-primary-soft border-b border-default hover:bg-neutral-secondary-medium">
+                    <th class="px-6 py-4" x-text="index + 1"></th>
+                    <td class="px-6 py-4" x-text="product.name"></td>
+                    <td class="px-6 py-4" x-text="product.size"></td>
+                    <td class="px-6 py-4" x-text="product.price"></td>
+                    <td class="px-6 py-4">
+                        <button type="button" x-on:click="btnEdit(product.id, product.stock?.quantity ? product.stock.quantity : 0 )" x-text="product.stock?.quantity ? product.stock.quantity : 'tidak ada stock' "></button>
+                    </td>
+                    <td class="px-6 py-4 text-right inline-flex gap-2">
+                        <button x-on:click="btnDelete(product.id)" type="button"  class="hover:underline text-red-400 hover:cursor-pointer hover:text-red-600 hover:font-semibold">Delete</button>
+                    </td>
+                </tr>
+            </template>
+        </template>
+    </tbody>
+</table>
+
+File web php
+<?php
+
+use App\Http\Controllers\AdminController;
+use App\Http\Controllers\ProfileController;
+use Illuminate\Support\Facades\Route;
+// registrasi alamat file model Product untuk digunakan
+use App\Models\Product;
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider and all of them will
+| be assigned to the "web" middleware group. Make something great!
+|
+*/
+
+Route::get('/', function () {
+    return view('welcome');
+});
+
+Route::get('/dashboard', function () {
+    return view('dashboard');
+})->middleware(['auth', 'verified'])->name('dashboard');
+
+Route::get('/admin-dashboard', function () {
+    // mengambil data seluruh product dengan nama relasinya
+
+    $listProduct = Product::with('stock')->get();
+    return view('admin.dashboard', ['products' => $listProduct]);
+})->middleware(['auth', 'verified'])->name('admin-dashboard');
+
+Route::middleware('auth')->group(function () {
+    // ROUTE FOR ADMIN
+    Route::post('store-product', [AdminController::class, 'store'])->name('store-product');
+    Route::get('list-product', [AdminController::class, 'getListProduct'])->name('list-product');
+    Route::delete('product-by/{productId}', [AdminController::class, 'deleteProduct'])->name('product.delete');
+    Route::get('product-by/{productId}/edit', [AdminController::class, 'getProductby'])->name('product.edit');
+    Route::patch('product/{product}/restock', [AdminController::class, 'updateStock'])->name('product.update.restock');
+
+
+    Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+});
+
+require __DIR__.'/auth.php';
+
+File route service provider
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Foundation\Support\Providers\RouteServiceProvider as ServiceProvider;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Route;
+
+class RouteServiceProvider extends ServiceProvider
+{
+    /**
+     * The path to your application's "home" route.
+     *
+     * Typically, users are redirected here after authentication.
+     *
+     * @var string
+     */
+    public const HOME = '/dashboard';
+
+     public const HOME_ADMIN = '/admin-dashboard';
+
+    /**
+     * Define your route model bindings, pattern filters, and other route configuration.
+     */
+    public function boot(): void
+    {
+        RateLimiter::for('api', function (Request $request) {
+            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+        });
+
+        $this->routes(function () {
+            Route::middleware('api')
+                ->prefix('api')
+                ->group(base_path('routes/api.php'));
+
+            Route::middleware('web')
+                ->group(base_path('routes/web.php'));
+        });
+    }
+}
